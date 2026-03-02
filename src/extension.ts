@@ -22,6 +22,7 @@ import { PRsTreeProvider } from './prs-tree';
 import { getEdition } from './vscode-compat';
 import { getAdoToken, promptAdoSignIn, setAdoAuthOutput } from './ado-auth';
 import { fetchAdoWorkItems, fetchAdoPRs, fetchAdoMe } from './ado-client';
+import { fetchLocalTasks } from './local-tasks-client';
 
 import { register as registerAgentCommands } from './commands/agent-commands';
 import { register as registerSessionCommands } from './commands/session-commands';
@@ -277,6 +278,9 @@ export function activate(context: vscode.ExtensionContext): { terminalManager: T
   // --- ADO integration ---
   initAdoIntegration(context, workItemsProvider, prsProvider);
 
+  // --- Local tasks integration ---
+  initLocalTasksIntegration(workItemsProvider);
+
   // Re-initialize ADO when organization or project settings change (#417)
   // Debounced to avoid concurrent API calls from rapid keystroke changes
   let adoDebounceTimer: NodeJS.Timeout | undefined;
@@ -304,6 +308,33 @@ export function activate(context: vscode.ExtensionContext): { terminalManager: T
       }
     }),
   );
+
+  // Re-initialize local tasks when folder config changes
+  let localDebounceTimer: NodeJS.Timeout | undefined;
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('editless.local.taskFolders')) {
+        if (localDebounceTimer) clearTimeout(localDebounceTimer);
+        localDebounceTimer = setTimeout(() => {
+          initLocalTasksIntegration(workItemsProvider);
+        }, 500);
+      }
+    }),
+  );
+
+  // Watch local task folders for file changes
+  const localFolders = vscode.workspace.getConfiguration('editless').get<string[]>('local.taskFolders', []);
+  for (const folder of localFolders) {
+    const pattern = new vscode.RelativePattern(folder, '*.md');
+    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+    const refreshLocal = () => {
+      fetchLocalTasks(folder).then(tasks => workItemsProvider.setLocalTasks(folder, tasks));
+    };
+    watcher.onDidChange(refreshLocal);
+    watcher.onDidCreate(refreshLocal);
+    watcher.onDidDelete(refreshLocal);
+    context.subscriptions.push(watcher);
+  }
 
   // --- Auto-refresh for Work Items & PRs ---
   const autoRefresh = initAutoRefresh(workItemsProvider, prsProvider);
@@ -449,4 +480,10 @@ async function initAdoIntegration(
 
   // Initial fetch
   await fetchAdoData();
+}
+
+function initLocalTasksIntegration(workItemsProvider: WorkItemsTreeProvider): void {
+  const config = vscode.workspace.getConfiguration('editless');
+  const folders = config.get<string[]>('local.taskFolders', []).filter(f => f.trim());
+  workItemsProvider.setLocalFolders(folders);
 }

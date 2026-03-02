@@ -362,6 +362,8 @@ vi.mock('../work-items-tree', () => ({
       setAdoItems: vi.fn(),
       setAdoConfig: vi.fn(),
       setAdoRefresh: vi.fn(),
+      setLocalFolders: vi.fn(),
+      setLocalTasks: vi.fn(),
       getLevelFilter: vi.fn(),
       setLevelFilter: vi.fn(),
       clearLevelFilter: vi.fn(),
@@ -372,6 +374,7 @@ vi.mock('../work-items-tree', () => ({
   WorkItemsTreeItem: class {
     issue?: unknown;
     adoWorkItem?: unknown;
+    localTask?: unknown;
     constructor(public label: string) {}
   },
 }));
@@ -423,6 +426,11 @@ vi.mock('../ado-auth', () => ({
 vi.mock('../ado-client', () => ({
   fetchAdoWorkItems: vi.fn(),
   fetchAdoPRs: vi.fn(),
+}));
+
+vi.mock('../local-tasks-client', () => ({
+  fetchLocalTasks: vi.fn().mockResolvedValue([]),
+  mapLocalState: vi.fn().mockReturnValue('open'),
 }));
 
 vi.mock('../squad-ui-integration', () => ({
