@@ -311,12 +311,16 @@ export function activate(context: vscode.ExtensionContext): { terminalManager: T
 
   // Re-initialize local tasks when folder config changes
   let localDebounceTimer: NodeJS.Timeout | undefined;
+  let localWatchers: vscode.Disposable[] = [];
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('editless.local.taskFolders')) {
         if (localDebounceTimer) clearTimeout(localDebounceTimer);
         localDebounceTimer = setTimeout(() => {
           initLocalTasksIntegration(workItemsProvider);
+          const folders = vscode.workspace.getConfiguration('editless')
+            .get<string[]>('local.taskFolders', []).filter(f => f.trim());
+          localWatchers = setupLocalFileWatchers(folders, workItemsProvider, localWatchers, context);
         }, 500);
       }
     }),
@@ -324,17 +328,7 @@ export function activate(context: vscode.ExtensionContext): { terminalManager: T
 
   // Watch local task folders for file changes
   const localFolders = vscode.workspace.getConfiguration('editless').get<string[]>('local.taskFolders', []);
-  for (const folder of localFolders) {
-    const pattern = new vscode.RelativePattern(folder, '*.md');
-    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-    const refreshLocal = () => {
-      fetchLocalTasks(folder).then(tasks => workItemsProvider.setLocalTasks(folder, tasks));
-    };
-    watcher.onDidChange(refreshLocal);
-    watcher.onDidCreate(refreshLocal);
-    watcher.onDidDelete(refreshLocal);
-    context.subscriptions.push(watcher);
-  }
+  localWatchers = setupLocalFileWatchers(localFolders, workItemsProvider, localWatchers, context);
 
   // --- Auto-refresh for Work Items & PRs ---
   const autoRefresh = initAutoRefresh(workItemsProvider, prsProvider);
@@ -486,4 +480,29 @@ function initLocalTasksIntegration(workItemsProvider: WorkItemsTreeProvider): vo
   const config = vscode.workspace.getConfiguration('editless');
   const folders = config.get<string[]>('local.taskFolders', []).filter(f => f.trim());
   workItemsProvider.setLocalFolders(folders);
+}
+
+function setupLocalFileWatchers(
+  folders: string[],
+  workItemsProvider: WorkItemsTreeProvider,
+  existing: vscode.Disposable[],
+  context: vscode.ExtensionContext,
+): vscode.Disposable[] {
+  for (const w of existing) w.dispose();
+  const watchers: vscode.Disposable[] = [];
+
+  for (const folder of folders) {
+    const pattern = new vscode.RelativePattern(folder, '*.md');
+    const watcher = vscode.workspace.createFileSystemWatcher(pattern);
+    const refreshLocal = () => {
+      fetchLocalTasks(folder).then(tasks => workItemsProvider.setLocalTasks(folder, tasks));
+    };
+    watcher.onDidChange(refreshLocal);
+    watcher.onDidCreate(refreshLocal);
+    watcher.onDidDelete(refreshLocal);
+    watchers.push(watcher);
+    context.subscriptions.push(watcher);
+  }
+
+  return watchers;
 }
